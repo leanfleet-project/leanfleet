@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en" data-theme="night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeanFleet</title>
+<meta name="description" content="LeanFleet: Learning Online Multi-AGV Dispatch from Rollout Planning">
+<link rel="stylesheet" href="style.css">
+<script>try { const t = localStorage.getItem("leanfleet-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}</script>
+<script type="importmap">{"imports": {"three": "./vendor/three/build/three.module.js"}}</script>
+</head>
+<body>
+<!-- Every number on this page is read from data generated from the paper's allowed
+     sources (paper/generated/numbers.json, project_page/data/*.json). No hand-typed results. -->
+
+<header class="topbar">
+  <a class="brand" href="#film">LeanFleet</a>
+  <a class="topbar-link" href="#overview">Read the project</a>
+</header>
+
+<section id="film" aria-label="One shift, replayed in 3D">
+  <div class="film-stage">
+    <canvas aria-label="Recorded 3D replay of the student dispatching a synthetic factory-like layout"></canvas>
+    <div class="film-shade"></div>
+    <div class="film-copy">
+      <div class="chapter"><h2>One shift.<br>One fleet.</h2>
+        <p><span data-film="n"></span> MiR100 robots on a synthetic factory-like layout, dispatched by LeanFleet.</p></div>
+      <div class="chapter"><h2>Orders wait<br>at stations.</h2>
+        <p>Planned work is known at the start; more arrives without notice.</p></div>
+      <div class="chapter"><h2>Red orders<br>cannot wait.</h2>
+        <p>A red order can stop a production line. The ring turns red while an AGV carries one.</p></div>
+      <div class="chapter"><h2>Every robot<br>keeps its zone.</h2>
+        <p>Safety zones of <span data-const="safety"></span>&nbsp;m never overlap in this replay.</p></div>
+      <div class="chapter chapter-title">
+        <p class="eyebrow">Manuscript under preparation</p>
+        <h1>LeanFleet</h1>
+        <p class="subtitle">Learning Online Multi-AGV Dispatch from Rollout Planning</p>
+        <p class="authors">Anonymous authors</p>
+        <nav class="links">
+          <span class="link off" title="not yet public">Paper</span>
+          <span class="link off" title="not yet public">arXiv</span>
+          <span class="link off" title="not yet public">Code</span>
+          <a class="link" href="#live">Live demo</a>
+          <a class="link" href="#bibtex">BibTeX</a>
+        </nav>
+      </div>
+    </div>
+    <aside class="hud" aria-label="Recording">
+      <p class="hud-head">Recorded replay</p>
+      <dl>
+        <dt>Layout</dt><dd data-hud="layout"></dd>
+        <dt>MiR100</dt><dd data-hud="fleet"></dd>
+        <dt>Seed</dt><dd><span data-hud="seed"></span> <small>illustration</small></dd>
+        <dt>Plan time</dt><dd data-hud="time"></dd>
+      </dl>
+      <p class="hud-sub">Waiting orders</p>
+      <div class="hud-chips"><span class="chip red" data-hud="red"></span><span class="chip yellow" data-hud="yellow"></span><span class="chip green" data-hud="green"></span></div>
+      <dl>
+        <dt>Carrying red</dt><dd data-hud="carrying"></dd>
+        <dt>Delivered on time / late</dt><dd data-hud="delivered"></dd>
+        <dt>AGV contacts</dt><dd data-hud="contacts"></dd>
+      </dl>
+      <p class="hud-foot">MuJoCo replay of the 2D plan, open-loop, <span data-const="replaycell"></span>&nbsp;m per cell, shown at <span data-hud="speed"></span> real time.</p>
+    </aside>
+    <nav class="chapter-bar" aria-label="Chapters">
+      <button>Shift</button><button>Orders</button><button>Red</button><button>Zones</button><button>LeanFleet</button>
+    </nav>
+    <p class="scroll-hint">Scroll</p>
+  </div>
+</section>
+
+<div class="shell">
+<nav class="toc" aria-label="Sections">
+  <a href="#overview">Overview</a>
+  <a href="#problem">Problem</a>
+  <a href="#method">Method</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#results">Results</a>
+  <a href="#earlier">Earlier methods</a>
+  <a href="#live">Live session</a>
+  <a href="#limits">Limitations</a>
+  <a href="#bibtex">BibTeX</a>
+</nav>
+
+<main>
+<section id="overview">
+  <p class="kicker">Overview</p>
+  <h2>Look ahead, then learn to do it fast.</h2>
+  <p class="lead">A rollout planner that weighs <em>assign now</em> against <em>not now</em> serves red orders with fewer AGVs, but it is too slow for large layouts. LeanFleet imitates it with a graph neural network (behaviour cloning, then DAgger) that decides fast enough to run online.</p>
+</section>
+
+<section id="problem">
+  <p class="kicker">Problem</p>
+  <h2>Planned at the start, red at any time.</h2>
+  <div class="facts">
+    <div><h3>Layouts</h3><p>Synthetic factory-like layouts on a grid of one-metre cells; one-lane roads in both directions; random road blocks.</p></div>
+    <div><h3>Fleet</h3><p>Every AGV starts at a warehouse, carries <span data-const="trays"></span> trays and keeps an order until it delivers it.</p></div>
+    <div><h3>Orders</h3><p>Most are planned at the start of the shift; the rest arrive unannounced. Red, yellow and green, each with a feasible deadline.</p></div>
+    <div><h3>Question</h3><p>With the demand fixed, how small can the fleet be while red orders stay on time?</p></div>
+  </div>
+</section>
+
+<section id="method">
+  <p class="kicker">Method</p>
+  <h2>A slow teacher, a fast student.</h2>
+  <div class="panel">
+    <div class="panel-tabs" role="tablist" data-tabs="pipe"><button aria-selected="true" data-tab="train">Training</button><button data-tab="deploy">Deployment</button></div>
+    <ol class="track" data-pane="pipe:train">
+      <li><span class="dot">1</span><p class="step">Teacher</p><h4>Rollout planner</h4><p>For the most urgent yellow or green order, try <span data-const="candidates"></span> AGVs and <em>not now</em>; simulate each <span data-const="horizon"></span>&nbsp;s ahead on <span data-const="futures"></span> sampled futures; keep the cheapest. Red orders follow a reservation rule.</p></li>
+      <li><span class="dot">2</span><p class="step">Labels</p><h4>Expert decisions</h4><p>The teacher dispatches <span data-const="trainshifts"></span> training shifts; every decision becomes a label.</p></li>
+      <li><span class="dot">3</span><p class="step">Imitation</p><h4>Behaviour cloning</h4><p>The graph policy learns to score the teacher's choice above the others.</p></li>
+      <li><span class="dot">4</span><p class="step">Correction</p><h4>DAgger</h4><p>The student drives; the teacher labels the states it reaches; train again. <span data-const="daggerrounds"></span> rounds.</p></li>
+      <svg class="loop" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path d="M100 40 C 100 4, 0 4, 0 40" /><path class="head" d="M-4 31 L0 40 L4 31" /></svg>
+    </ol>
+    <ol class="track" data-pane="pipe:deploy" hidden>
+      <li><span class="dot">1</span><p class="step">Every <span data-const="review"></span>&nbsp;s</p><h4>Read the state</h4><p>Road graph with occupancy, AGVs with their plans, waiting orders.</p></li>
+      <li><span class="dot">2</span><p class="step">Policy</p><h4>Score</h4><p>One score per (order, AGV) pair for the nearest AGVs, and one for <em>not now</em>.</p></li>
+      <li><span class="dot">3</span><p class="step">Decode</p><h4>Assign or wait</h4><p>Wait if <em>not now</em> takes at least half of the probability. Orders past their deadline go to their cheapest insertion.</p></li>
+      <li><span class="dot">4</span><p class="step">Route</p><h4>Execute</h4><p>Central time-reservation routing moves the AGVs; the 3D replay drives the same plan with physics.</p></li>
+    </ol>
+  </div>
+</section>
+
+<section id="architecture">
+  <p class="kicker">Architecture</p>
+  <h2>Road graph in, one score per choice out.</h2>
+  <p>Click a block to see what it does. The network has <span data-const="params" data-format="int"></span> parameters.</p>
+  <div class="panel arch">
+    <div class="arch-toolbar"><button class="tool" data-arch-play aria-pressed="false">Play the forward pass</button></div>
+    <svg id="arch-svg" viewBox="0 0 960 430" role="img" aria-label="Network architecture"></svg>
+    <div class="arch-inspector" id="arch-inspector" aria-live="polite"></div>
+  </div>
+</section>
+
+<section id="results">
+  <p class="kicker">Results · paper seeds</p>
+  <h2>Fewer AGVs on the larger layouts.</h2>
+  <p>Share of orders on time against fleet size, with <span data-const="bootci"></span>&nbsp;% bootstrap bands; dashed lines mark the targets.</p>
+  <div class="panel">
+    <div class="panel-tabs" role="tablist" id="layout-tabs"></div>
+    <div class="chart-pair"><figure id="curve-red"></figure><figure id="curve-all"></figure></div>
+  </div>
+  <h3 class="table-title">Minimum fleet with red on time &ge; <span data-const="redmain"></span>&nbsp;% / &ge; <span data-const="redlo"></span>&nbsp;%</h3>
+  <div class="table-wrap"><table id="minfleet" class="data"></table></div>
+  <p class="note">Generated layouts in units of their reference fleet. The teacher needs fewer AGVs than the student on map2a and map3a. On map1a the student has no minimum fleet at <span data-const="redmain"></span>&nbsp;%, and on the two small maps the bands of the best methods overlap. A dash means the target is not reached in the swept range.</p>
+</section>
+
+<section id="earlier">
+  <p class="kicker">Earlier methods · development seeds</p>
+  <h2>Same network, different teacher.</h2>
+  <p>With a tight fleet, the student keeps the slowest pick-ups of red orders short; the earlier IL+RL network, Nearest and LNS let some of them wait much longer. This describes small samples and is not a test; the short tail comes from the reservation rule the teacher uses for red orders.</p>
+  <div class="panel"><figure id="pickup"></figure></div>
+  <h3 class="table-title">Decision time per call, p99 (charged time)</h3>
+  <div class="panel"><figure id="dtime"></figure></div>
+</section>
+
+<section id="live">
+  <p class="kicker">Live session</p>
+  <h2>Run the factory yourself.</h2>
+  <p>The paper's simulator runs in your browser (Python via Pyodide) with the student network, and MuJoCo replays its plan in 3D. The layout appears in 3D and 2D when you reach this section; pick a fleet size and a dispatcher, press Start, and add your own orders while the shift runs. Click ⇄ to swap the two views.</p>
+  <div class="console">
+    <div class="console-bar">
+      <label>Layout <select id="live-layout"><option>map1a</option><option>map2a</option><option selected>map3a</option></select></label>
+      <label>Fleet <input id="live-fleet" type="range" min="50" max="100" step="10" value="70"><output id="live-fleet-out">70 %</output></label>
+      <label>Dispatcher <select id="live-disp"><option value="student">LeanFleet (student)</option><option value="reserve1">Reserve-1</option><option value="nearest">Nearest</option></select></label>
+      <label>Seed <input id="live-seed" type="number" min="0" max="999" value="510"></label>
+      <label class="check"><input id="live-3d" type="checkbox" checked> 3D</label>
+      <span class="grow"></span>
+      <button class="tool primary" id="live-start">Start</button>
+      <button class="tool" id="live-pause">Pause</button>
+      <span class="seg"><button class="tool" data-speed="2">slow</button><button class="tool" data-speed="4">normal</button><button class="tool" data-speed="15">fast</button></span>
+    </div>
+    <div class="stage" id="live-stage">
+      <canvas id="live-3d-canvas" aria-label="3D replay of the live plan with MuJoCo physics"></canvas>
+      <div class="inset" id="live-inset">
+        <canvas id="live-canvas" aria-label="Live simulation, 2D plan"></canvas>
+        <button class="swap-btn" id="live-swap" title="Swap the 2D and 3D views" aria-label="Swap the 2D and 3D views">⇄</button>
+      </div>
+      <div class="stage-tools">
+        <span class="seg"><button class="tool" data-cam="overview">Fleet</button><button class="tool" data-cam="top">Top</button><button class="tool" data-cam="follow">Follow</button></span>
+        <input id="live-follow" type="number" min="0" max="30" value="0" aria-label="AGV to follow">
+        <label class="check"><input id="live-zones" type="checkbox" checked> zones</label>
+      </div>
+      <div class="stage-stats"><p id="live-stats"></p><p id="live-3d-stats"></p></div>
+      <div class="stage-legend legend"><span><i style="background:var(--s-student)"></i>AGV</span><span><i style="background:var(--s-lns)"></i>carrying red</span>
+        <span><i class="sq" style="background:var(--s-lns)"></i><i class="sq" style="background:var(--s-gnn)"></i><i class="sq" style="background:var(--s-nearest)"></i>waiting</span>
+        <span><i class="sq" style="background:var(--s-teacher)"></i>warehouse</span><span><i style="background:var(--accent)"></i>station</span></div>
+    </div>
+    <div class="console-bar">
+      <b>Add an order</b>
+      <label>from <select id="live-from"></select></label>
+      <label>to <select id="live-to"></select></label>
+      <label>priority <select id="live-prio"><option value="1">red</option><option value="2">yellow</option><option value="3">green</option></select></label>
+      <label>trays <select id="live-size"><option>1</option><option>2</option><option>3</option><option>5</option></select></label>
+      <button class="tool primary" id="live-add">Add</button>
+      <span class="grow"></span><span id="live-status" class="readout">Not started.</span>
+    </div>
+  </div>
+  <p class="note">Within the problem as posed: orders stay with their AGV, the fleet is fixed for the shift, and your order gets the tightest deadline the model allows. Development seeds only (paper seeds are never used here). The browser runs the same Python code as the paper; the student uses the trained weights in numpy and picks the same actions as the trained network on every state we checked, though long runs can drift after near-ties. The 3D view replays the 2D plan open-loop with MuJoCo physics (WebAssembly) under the rules of the paper's replay: <span data-const="replaycell"></span>&nbsp;m per cell, <span data-const="safety"></span>&nbsp;m safety zones, an AGV enters a cell only after its previous occupant has left. It never changes a decision; waiting orders and road blocks are drawn, not simulated. The counters are measured in your browser.</p>
+</section>
+
+<section id="limits">
+  <p class="kicker">Limitations</p>
+  <h2>What this does not show.</h2>
+  <ul class="limits">
+    <li>Loading times, priorities, deadlines and demand are our assumptions; the layouts are synthetic.</li>
+    <li>The model moves one cell per second and turns instantly; with <span data-const="replaycell"></span>&nbsp;m cells that is faster than a MiR100.</li>
+    <li>Fewer AGVs mean longer deliveries; the delivery-time part of our hypothesis is not met.</li>
+    <li>Decision times are charged by a calibrated cost model.</li>
+  </ul>
+</section>
+
+<section id="bibtex">
+  <p class="kicker">Citation</p>
+  <h2>BibTeX</h2>
+  <pre id="bib">@article{leanfleet,
+  title  = {LeanFleet: Learning Online Multi-AGV Dispatch from Rollout Planning},
+  author = {Anonymous},
+  note   = {manuscript}
+}</pre>
+  <button class="tool" id="copy-bib">Copy</button>
+</section>
+</main>
+</div>
+
+<footer><p>Numbers on this page are generated from the paper's results. Robot and factory models rendered with three.js; physics by MuJoCo (WebAssembly).</p></footer>
+
+<div class="theme-switch" role="group" aria-label="Theme">
+  <button data-theme-set="day" aria-label="Day theme">☀</button><button data-theme-set="night" aria-label="Night theme">☾</button>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
